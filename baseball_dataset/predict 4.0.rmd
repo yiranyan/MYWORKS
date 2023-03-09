@@ -1,0 +1,527 @@
+---
+title: "predict"
+author: "Qinyun Cai"
+date: "2022-11-24"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list=ls(all=TRUE))
+cat("\014")
+```
+
+```{r}
+library(ggplot2)
+library(here)
+library(tidyverse)
+library(forecast)
+library(leaps)
+library(neuralnet)
+library(caret)
+library(Metrics)
+#install.packages('NeuralNetTools')
+library(NeuralNetTools)
+#install.packages('ggpol')
+library(ggpol)
+```
+
+```{r}
+#player <- read.csv(here('baseballdatabank-2022.2','core','People.csv'))
+#str(player)
+batting <- read.csv(here('baseballdatabank-2022.2',
+                         'core','Batting.csv'))
+
+salary <- read.csv(here('baseballdatabank-2022.2',
+                         'contrib','Salaries.csv'))
+```
+
+
+
+```{r}
+# set 2014 as valid set 
+salary2014 <- salary[salary$yearID=="2014",]
+batting2014 <- batting[batting$yearID=="2014",]
+```
+
+# 1. select 2013 
+
+```{r}
+# 2013
+salary1y <- salary[salary$yearID=='2013',]
+batting1y <- batting[batting$yearID=="2013",]
+
+#2012, 2013
+salary2y<- salary[salary$yearID=='2012'| salary$yearID=='2013',]
+batting2y <- batting[batting$yearID=="2012"|batting$yearID=="2013",]
+
+#2011, 2012, 2013
+salary3y<- salary[salary$yearID=='2011'|salary$yearID=='2012'| salary$yearID=='2013',]
+batting3y <- batting[batting$yearID=="2011"|batting$yearID=="2012"|batting$yearID=="2013",]
+
+#2010, 2011, 2012, 2013
+salary4y<- salary[salary$yearID=='2010'|salary$yearID=='2011'|salary$yearID=='2012'| salary$yearID=='2013',]
+batting4y <- batting[batting$yearID=='2010'|batting$yearID=="2011"|batting$yearID=="2012"|batting$yearID=="2013",]
+
+#2009，2010，2011，2012，2013
+salary5y <- salary[salary$yearID=='2009'| salary$yearID=='2010'| salary$yearID=='2011'
+                  | salary$yearID=='2012'| salary$yearID=='2013',]
+batting5y <- batting[batting$yearID=="2009"|batting$yearID=="2010"|
+                      batting$yearID=="2011"|batting$yearID=="2012"|
+                      batting$yearID=="2013",]
+
+#2008, 2009,2010, 2011, 2012, 2013
+salary6y<- salary[salary$yearID=='2008'|salary$yearID=='2009'|salary$yearID=='2010'|salary$yearID=='2011'|salary$yearID=='2012'| salary$yearID=='2013',]
+batting6y <- batting[batting$yearID=='2008'|batting$yearID=='2009'|batting$yearID=='2010'|batting$yearID=="2011"|batting$yearID=="2012"|batting$yearID=="2013",]
+
+```
+
+# merge table
+
+```{r}
+salary2014 <- salary2014[,c(2,4,5)]
+df2014=merge(batting2014, salary2014, all=TRUE, sort=TRUE)
+df2014 <- na.omit(df2014)
+
+#salary2014 <- salary2014[,c(2,4,5)]
+
+# merge df1y <- 2013
+df1y=merge(batting1y, salary1y, all=TRUE, sort=TRUE)
+df1y <- na.omit(df1y)
+
+# merge df2y <- 2012, 2013
+df2y=merge(batting2y, salary2y, all=TRUE, sort=TRUE)
+df2y <- na.omit(df2y)
+
+#merge df3y <- 2011, 2012, 2013
+df3y=merge(batting3y, salary3y, all=TRUE, sort=TRUE)
+df3y <- na.omit(df3y)
+
+#merge df4y <- 2010, 2011, 2012, 2013
+df4y=merge(batting4y, salary4y, all=TRUE, sort=TRUE)
+df4y <- na.omit(df4y)
+
+#merge df5y <- 2009,2010,2011,2012,2013
+df5y=merge(batting5y, salary5y, all=TRUE, sort=TRUE)
+df5y <- na.omit(df5y)
+
+#merge df6y <- 2008, 2009,2010, 2011, 2012, 2013
+df6y=merge(batting6y, salary6y, all=TRUE, sort=TRUE)
+df6y <- na.omit(df6y)
+
+
+df2014 <- df2014[df2014$AB>50,]
+df1y <- df1y[df1y$AB>50,]
+df2y <- df2y[df2y$AB>50,]
+df3y <- df3y[df3y$AB>50,]
+df4y <- df4y[df4y$AB>50,]
+df5y <- df5y[df5y$AB>50,]
+df6y <- df6y[df6y$AB>50,]
+
+
+df2014 <- df2014[,-c(1:5)]
+df1y <- df1y[,-c(1:5)]
+df2y <- df2y[,-c(1:5)]
+df3y <- df3y[,-c(1:5)]
+df4y <- df4y[,-c(1:5)]
+df5y <- df5y[,-c(1:5)]
+df6y <- df6y[,-c(1:5)]
+
+```
+
+```{r}
+# setup training set and validation set 
+train.df1y <- df1y
+train.df2y <- df2y
+train.df3y <- df3y
+train.df4y <- df4y
+train.df5y <- df5y
+train.df6y <- df6y
+
+valid.df <- df2014
+
+```
+
+```{r}
+set.seed(1212)
+```
+
+
+# regression and nn for 1 year (2013)
+
+```{r}
+# regression 1 year (2013)
+reg1y <- lm(salary ~ ., data = train.df1y)
+step.both1y <- step(reg1y, direction = "both")
+summary(step.both1y)
+
+# lm(formula = salary ~ G + SH, data = train.df1y)
+```
+
+```{r}
+norm.values1y <- preProcess(train.df1y, method="range")
+train.norm.df1y <- predict(norm.values1y, train.df1y)
+valid.norm.df <- predict(norm.values1y, valid.df)
+```
+
+```{r}
+ 
+nn1y <- neuralnet(train.norm.df1y$salary ~ G+ SH, data = train.norm.df1y, linear.output = T, hidden = 2)
+plot(nn1y, rep = "best")
+#par(cex = 0.6)
+#plotnet(nn1y,pos_col = "red", neg_col = "grey")
+```
+
+```{r}
+options(scipen = 0)
+pred1t <- compute(nn1y, train.norm.df1y)$net.result
+rmse1t <- rmse(train.norm.df1y$salary, pred1t)
+rmse1t
+
+pred1v <- compute(nn1y, valid.norm.df)$net.result
+rmse1v <- rmse(valid.norm.df$salary, pred1v)
+rmse1v
+```
+```{r}
+ 
+nn1y <- neuralnet(train.norm.df1y$salary ~ G + SH, data = train.norm.df1y, linear.output = T, hidden = 5)
+plot(nn1y, rep = "best")
+```
+
+
+```{r}
+options(scipen = 0)
+pred1t5 <- compute(nn1y, train.norm.df1y)$net.result
+rmse1t5 <- rmse(train.norm.df1y$salary, pred1t5)
+rmse1t5
+
+pred1v5 <- compute(nn1y, valid.norm.df)$net.result
+rmse1v5 <- rmse(valid.norm.df$salary, pred1v5)
+rmse1v5
+```
+
+
+# regression and nn for 2 year (2012, 2013)
+
+```{r}
+# regression 2 year (12, 2013)
+reg2y <- lm(salary ~ ., data = train.df2y)
+step.both2y <- step(reg2y, direction = "both")
+summary(step.both2y)
+
+#lm(formula = salary ~ G + AB + CS + IBB + SH, data = train.df2y)
+
+```
+
+```{r}
+norm.values2y <- preProcess(train.df2y, method="range")
+train.norm.df2y <- predict(norm.values2y, train.df2y)
+#valid.norm.df <- predict(norm.values2y, valid.df)
+```
+
+```{r}
+ 
+nn2y <- neuralnet(train.norm.df2y$salary ~ G + AB + CS + IBB + SH, data = train.df2y, linear.output = T, hidden = 2,stepmax = 1e7)
+plot(nn2y, rep = "best")
+#par(cex = 0.6)
+#plotnet(nn1y,pos_col = "red", neg_col = "grey")
+```
+
+```{r}
+options(scipen = 0)
+pred2t <- compute(nn2y, train.norm.df2y)$net.result
+rmse2t <- rmse(train.norm.df2y$salary, pred2t)
+rmse2t
+
+pred2v <- compute(nn2y, valid.norm.df)$net.result
+rmse2v <- rmse(valid.norm.df$salary, pred2v)
+rmse2v
+
+```
+
+```{r}
+ 
+nn2y <- neuralnet(train.norm.df2y$salary ~ G + AB + CS + IBB + SH, data = train.df2y, linear.output = T, hidden = 5,stepmax = 1e7)
+plot(nn2y, rep = "best")
+```
+
+
+```{r}
+options(scipen = 0)
+pred2t5 <- compute(nn2y, train.norm.df2y)$net.result
+rmse2t5 <- rmse(train.norm.df2y$salary, pred2t5)
+rmse2t5
+
+pred2v5 <- compute(nn2y, valid.norm.df)$net.result
+rmse2v5 <- rmse(valid.norm.df$salary, pred2v5)
+rmse2v5
+```
+
+# regression and nn for 3 year (2011, 2012, 2013)
+
+```{r}
+# regression 3 year (11, 12, 2013)
+reg3y <- lm(salary ~ ., data = train.df3y)
+step.both3y <- step(reg3y, direction = "both")
+summary(step.both3y)
+
+#lm(formula = salary ~ G + AB + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df3y)
+
+
+```
+
+```{r}
+norm.values3y <- preProcess(train.df3y, method="range")
+train.norm.df3y <- predict(norm.values3y, train.df3y)
+#valid.norm.df <- predict(norm.values2y, valid.df)
+```
+
+```{r}
+ 
+nn3y <- neuralnet(train.norm.df3y$salary ~ G + AB + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df3y, linear.output = T, hidden = 2,stepmax=1e7)
+plot(nn3y, rep = "best")
+#par(cex = 0.6)
+#plotnet(nn1y,pos_col = "red", neg_col = "grey")
+```
+
+```{r}
+options(scipen = 0)
+pred3t <- compute(nn3y, train.norm.df3y)$net.result
+rmse3t <- rmse(train.norm.df3y$salary, pred3t)
+rmse3t
+
+pred3v <- compute(nn3y, valid.norm.df)$net.result
+rmse3v <- rmse(valid.norm.df$salary, pred3v)
+rmse3v
+```
+```{r}
+ 
+nn3y <- neuralnet(train.norm.df3y$salary ~ G + AB + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df3y, linear.output = T, hidden = 5,stepmax = 1e7)
+plot(nn3y, rep = "best")
+```
+
+
+```{r}
+options(scipen = 0)
+pred3t5 <- compute(nn3y, train.norm.df3y)$net.result
+rmse3t5 <- rmse(train.norm.df3y$salary, pred3t5)
+rmse3t5
+
+pred3v5 <- compute(nn3y, valid.norm.df)$net.result
+rmse3v5 <- rmse(valid.norm.df$salary, pred3v5)
+rmse3v5
+```
+
+# regression and nn for 4 year (2010, 2011, 2012, 2013)
+
+```{r}
+# regression 4 year (10, 11, 12, 2013)
+reg4y <- lm(salary ~ ., data = train.df4y)
+step.both4y <- step(reg4y, direction = "both")
+summary(step.both4y)
+
+#lm(formula = salary ~ G + AB + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df4y)
+
+```
+
+```{r}
+norm.values4y <- preProcess(train.df4y, method="range")
+train.norm.df4y <- predict(norm.values4y, train.df4y)
+#valid.norm.df <- predict(norm.values2y, valid.df)
+```
+
+```{r}
+ 
+nn4y <- neuralnet(train.norm.df4y$salary ~ G + AB + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df4y, linear.output = T, hidden = 2)
+plot(nn4y, rep = "best")
+#par(cex = 0.6)
+#plotnet(nn1y,pos_col = "red", neg_col = "grey")
+```
+
+```{r}
+options(scipen = 0)
+pred4t <- compute(nn4y, train.norm.df4y)$net.result
+rmse4t <- rmse(train.norm.df4y$salary, pred4t)
+rmse4t
+
+pred4v <- compute(nn4y, valid.norm.df)$net.result
+rmse4v <- rmse(valid.norm.df$salary, pred4v)
+rmse4v
+```
+```{r}
+ 
+nn4y <- neuralnet(train.norm.df4y$salary ~ G + AB + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df4y, linear.output = T, hidden = 5,stepmax = 1e7)
+plot(nn4y, rep = "best")
+```
+
+
+```{r}
+options(scipen = 0)
+pred4t5 <- compute(nn4y, train.norm.df4y)$net.result
+rmse4t5 <- rmse(train.norm.df4y$salary, pred4t5)
+rmse4t5
+
+pred4v5 <- compute(nn4y, valid.norm.df)$net.result
+rmse4v5 <- rmse(valid.norm.df$salary, pred4v5)
+rmse4v5
+```
+
+# regression and nn for 5 year (2019,2010, 2011, 2012, 2013)
+```{r}
+# regression 5 year (09,10, 11, 12, 2013)
+reg5y <- lm(salary ~ ., data = train.df5y)
+step.both5y <- step(reg5y, direction = "both")
+summary(step.both5y)
+
+#lm(formula = salary ~ G + AB + X2B + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df5y)
+```
+
+```{r}
+norm.values5y <- preProcess(train.df5y, method="range")
+train.norm.df5y <- predict(norm.values5y, train.df5y)
+#valid.norm.df <- predict(norm.values2y, valid.df)
+```
+
+
+```{r}
+ 
+nn5y <- neuralnet(train.norm.df5y$salary ~ G + AB + X2B + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df5y, linear.output = T, hidden = 2, stepmax = 1e7)
+plot(nn5y, rep = "best")
+```
+
+
+```{r}
+options(scipen = 0)
+pred5t <- compute(nn5y, train.norm.df5y)$net.result
+rmse5t <- rmse(train.norm.df5y$salary, pred5t)
+rmse5t
+
+pred5v <- compute(nn5y, valid.norm.df)$net.result
+rmse5v <- rmse(valid.norm.df$salary, pred5v)
+rmse5v
+```
+
+
+```{r}
+ 
+nn5y <- neuralnet(train.norm.df5y$salary ~ G + AB + X2B + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df5y, linear.output = T, hidden = 5, stepmax=1e7)
+plot(nn5y, rep = "best")
+```
+
+
+```{r}
+options(scipen = 0)
+pred5t5 <- compute(nn5y, train.norm.df5y)$net.result
+rmse5t5 <- rmse(train.norm.df5y$salary, pred5t5)
+rmse5t5
+
+pred5v5 <- compute(nn5y, valid.norm.df)$net.result
+rmse5v5 <- rmse(valid.norm.df$salary, pred5v5)
+rmse5v5
+```
+
+
+# regression and nn for 6 year (2008, 2009, 2010, 2011, 2012, 2013)
+
+```{r}
+# regression 6 year (08, 09, 10, 11, 12, 2013)
+reg6y <- lm(salary ~ ., data = train.df6y)
+step.both6y <- step(reg6y, direction = "both")
+summary(step.both6y)
+
+#lm(formula = salary ~ G + AB + X2B + X3B + RBI + SB + CS + BB + SO + IBB + SH + SF, data = train.df6y)
+
+#lm(formula = salary ~ G + AB + X2B + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df6y)
+
+
+```
+
+```{r}
+norm.values6y <- preProcess(train.df6y, method="range")
+train.norm.df6y <- predict(norm.values6y, train.df6y)
+#valid.norm.df <- predict(norm.values2y, valid.df)
+```
+
+```{r}
+ 
+nn6y <- neuralnet(train.norm.df6y$salary ~ G + AB + X2B + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df6y, linear.output = T, hidden = 2)
+plot(nn6y, rep = "best")
+#par(cex = 0.6)
+#plotnet(nn1y,pos_col = "red", neg_col = "grey")
+```
+
+```{r}
+options(scipen = 0)
+pred6t <- compute(nn6y, train.norm.df6y)$net.result
+rmse6t <- rmse(train.norm.df6y$salary, pred6t)
+rmse6t
+
+pred6v <- compute(nn6y, valid.norm.df)$net.result
+rmse6v <- rmse(valid.norm.df$salary, pred6v)
+rmse6v
+
+```
+
+
+```{r}
+ 
+nn6y <- neuralnet(train.norm.df6y$salary ~ G + AB + X2B + X3B + RBI + CS + BB + SO + IBB + SH, data = train.df6y, linear.output = T, hidden = 5, stepmax=1e7)
+plot(nn6y, rep = "best")
+```
+
+
+```{r}
+options(scipen = 0)
+pred6t5 <- compute(nn6y, train.norm.df6y)$net.result
+rmse6t5 <- rmse(train.norm.df6y$salary, pred6t5)
+rmse6t5
+
+pred6v5 <- compute(nn6y, valid.norm.df)$net.result
+rmse6v5 <- rmse(valid.norm.df$salary, pred6v5)
+rmse6v5
+```
+
+
+
+#RMSE comparison 
+
+
+```{r}
+rmse.h2 <- data.frame(
+  year=c('1 year','2 year','3 year','4 year','5 year','6 year'),
+  train.rmse=c(rmse1t,rmse2t,rmse3t,rmse4t,rmse5t,rmse6t),
+  valid.rmse=c(rmse1v,rmse2v,rmse3v,rmse4v,rmse5v,rmse6v))
+
+rmse.h5 <- data.frame(
+  year=c('1 year','2 year','3 year','4 year','5 year','6 year'),
+  train.rmse=c(rmse1t5,rmse2t5,rmse3t5,rmse4t5,rmse5t5,rmse6t5),
+  valid.rmse=c(rmse1v5,rmse2v5,rmse3v5,rmse4v5,rmse5v5, rmse6v5))
+```
+
+```{r}
+library(reshape2)
+rmse.h2 <- melt(rmse.h2,id="year")
+colnames(rmse.h2) <- c("year","rmse.type","value")
+ggplot(data = rmse.h2,aes(x=year,y=value,group = rmse.type,color=rmse.type,shape=rmse.type))+
+  geom_point()+
+  geom_line()
+```
+
+
+```{r}
+library(reshape2)
+rmse.h5 <- melt(rmse.h5,id="year")
+colnames(rmse.h5) <- c("year","rmse.type","value")
+ggplot(data = rmse.h5,aes(x=year,y=value,group = rmse.type,color=rmse.type,shape=rmse.type))+
+  geom_point()+
+  geom_line()
+```
+```{r}
+# we choose model with accumulative 5 years and neural network model with hidden layer = 5
+olden(nn5y)+ggtitle("Variable importance using connection weights")
+```

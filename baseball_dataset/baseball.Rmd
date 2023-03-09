@@ -1,0 +1,231 @@
+---
+title: "Baseball_data_analyze"
+author: "Yiran Yan"
+date: "2022-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+clean the environment
+```{r}
+rm(list=ls(all=TRUE))
+cat("\014")
+```
+
+load the library
+```{r}
+library(ggplot2)
+library(here)
+library(tidyverse)
+```
+
+load the data
+*I just use some table that I think usable, you guys can explore the data description and find other usable tables*
+```{r}
+player <- read.csv(here('baseballdatabank-2022.2',
+                        'core','People.csv'))
+#str(player)
+batting <- read.csv(here('baseballdatabank-2022.2',
+                         'core','Batting.csv'))
+
+#str(salary)
+pitch <- read.csv(here('baseballdatabank-2022.2',
+                       'core','Pitching.csv'))
+
+```
+
+
+## visualization:
+* overview the BMI
+**focus on batting table**:
+* density of IsoP and BMI
+* density of OBP
+* density of Hit average
+* relationship between a player’s strikeout rate (SO/AB) and his home run rate(HR/AB)
+
+## prediction:
+* Variables related to player salary:
+* using stepwise to choose variables
+* put the choosen variable into nerual network
+* compare the rmse of 2 hidden layer and 5 hidden layer
+* using olden to figure out which variables are the most affectable to salary
+
+
+
+* Correlation between physical condition (BMI standard weight) and  Isolated Power percentage (a measure of slugging ability, Slugging Percentage-Batting average)
+
+SLG = (H + 2B + (2 x 3B) + (3 x HR))/AB
+IsoP = (H + 2B + (2 x 3B) + (3 x HR))/AB - H/AB
+In US units: BMI = weight (lb) ÷ height2 (inches) * 703
+
+```{r}
+options(scipen = 200)
+
+#calculate IsoP
+#choose AB>50, yearID > 1995(Updated the competition format in 1995)
+batting1 <- batting[batting$AB>50,]
+
+batting1 <- batting1%>%
+  group_by(playerID,yearID)%>%
+  summarise(AB_sum=sum(AB),
+            H_sum=sum(H),
+            X2B_sum=sum(X2B),
+            X3B_sum=sum(X3B),
+            HR_sum=sum(HR))%>%
+  mutate(IsoP=(H_sum+X2B_sum+(2*X3B_sum)+(3*HR_sum))/AB_sum-H_sum/AB_sum)
+
+batting1 <- batting1[batting1$IsoP>0,]
+batting1 <- batting1[batting1$yearID>1995,]
+
+ggplot(batting1, aes(x=IsoP)) + 
+ geom_histogram(aes(y=..density..), colour="light blue", fill="white")+
+ geom_density(alpha=.2, color='light blue',fill="#4A77B3",adjust=1.5)
+
+#calculate BMI
+player <- player%>%
+  group_by(playerID)%>%
+  mutate(BMI=weight/(height*height)*703)
+
+#summary(player$BMI)
+#str(player$BMI)
+
+ggplot(player, aes(x=BMI)) + 
+ geom_histogram(aes(y=..density..), colour="light blue", fill="white")+
+ geom_density(alpha=.2, color='light blue',fill="#4A77B3",adjust=1.5)
+ 
+```
+
+
+```{r}
+#combine IsoP and BMI
+b_p <- merge(batting1, player, by = "playerID",all=FALSE)#inner join
+
+#check the relationship between BMI and IsoP (using point, bar chart and boxplot)
+
+#point(scatter)
+ggplot(b_p,aes(x=BMI,y=IsoP))+
+  geom_point()+
+  geom_smooth()
+
+#group bmi data
+#18.5 and 24.9
+b_p<- b_p %>%
+  mutate(bmi_group = case_when(
+    BMI <= 18.5 ~  'Underweight',
+    BMI >18.5 & BMI<=23 ~ 'Normal_1',
+    BMI > 23 & BMI <=25 ~ 'Normal_2',
+    BMI >25 & BMI <=27 ~ 'Overweight_1',
+    BMI > 27 & BMI <= 30 ~'Overweight_2',
+    BMI >30 ~ 'Obese'))
+
+#unique(b_p$bmi_group)
+#table(complete.cases(b_p$bmi_group))# no na values
+
+#bar chart
+mean <-  b_p %>%
+  group_by(bmi_group) %>%
+  summarize(value = mean(IsoP))
+mean %>%
+  ggplot(aes(x = fct_reorder(bmi_group, value), y = value)) +
+  geom_col(fill='light blue')+
+  labs(x='BMI',y='avgerage value of IsoP')
+  
+#boxplot
+ggplot(b_p,aes(x=reorder(bmi_group,IsoP),y=IsoP))+
+ geom_boxplot(fill='light blue')+
+ labs(x='BMI',y='IsoP')
+
+#correlation
+cor(b_p$BMI,b_p$IsoP,method="pearson")
+```
+
+
+
+#### OBP = (Hits + Walks(BB) + Hit by Pitch) / (At Bats + Walks(BB) + Hit by Pitch + Sacrifice Flies).
+
+```{r}
+b_pitch <- merge(batting1, pitch, by = "playerID",all.y=FALSE)
+obp <- batting%>%
+  group_by(playerID,yearID)%>%
+  summarise(hits_sum=sum(H),
+            walks_sum=sum(BB),
+            HBP_sum=sum(HBP),
+            AB_sum=sum(AB),
+            SF_sum=sum(SF))%>%
+  mutate(OBP=(hits_sum+walks_sum+HBP_sum)/(AB_sum+walks_sum+HBP_sum+SF_sum))
+# check the N.A value of obp
+table(is.na(obp))
+# drop na values
+obp <- na.omit(obp)
+
+obp1 <- obp[obp$OBP>0,]
+obp1 <- obp1[obp1$yearID>1995,]
+
+ggplot(obp1, aes(x=OBP)) + 
+ geom_histogram(aes(y=..density..), colour="light blue", fill="white")+
+ geom_density(alpha=.2, color='light blue',fill="#4A77B3",adjust=1.5)+
+labs(x='On base percentage')
+
+```
+
+#### Hits average = hits/ab
+
+```{r}
+batting2 <- batting[batting$AB>50,] 
+ 
+#Calculate Batting Average (AVG) = Hits/AB 
+# <- batting2%>%group_by(playerID)%>%mutate(AVG = H/AB) 
+ 
+batting2 <- batting2%>% 
+  group_by(playerID,yearID)%>% 
+  summarise(H_sum = sum(H), 
+            AB_sum = sum(AB))%>% 
+  mutate(AVG = H_sum/AB_sum) 
+ 
+   
+# filter out AVG>0 and yearID>1995 
+batting2 <- batting2[batting2$AVG>0,] 
+batting2 <- batting2[batting2$yearID>1995,]
+
+ggplot(batting2, aes(x=AVG)) +  
+ geom_histogram(aes(y=..density..), colour="light blue", fill="white")+ 
+ geom_density(alpha=.2, color='light blue',fill="#4A77B3",adjust=1.5)+
+ labs(x='Hits Average')
+
+```
+
+
+
+```{r}
+library(plyr)
+dataframe.AB <- ddply(batting, .(playerID), summarize,Career.AB=sum(AB, na.rm=TRUE))
+#dataframe.AB
+Batting <- merge(batting, dataframe.AB, by="playerID")
+Batting.5000 <- subset(Batting, Career.AB >= 5000)
+ab.hr.so <- function(d){
+  c.AB <- sum(d$AB, na.rm=TRUE)
+  c.HR <- sum(d$HR, na.rm=TRUE)
+  c.SO <- sum(d$SO, na.rm=TRUE)
+  data.frame(AB=c.AB, HR=c.HR, SO=c.SO)
+  }
+aaron <- subset(Batting.5000, playerID == "aaronha01")
+#ab.hr.so(aaron)
+d.5000 <- ddply(Batting.5000, .(playerID), ab.hr.so)
+d.5000 <- ddply(Batting.5000, .(playerID), ab.hr.so)
+ggplot(d.5000,aes(x=HR/AB,y=SO/AB))+
+    geom_point()+
+    geom_smooth()
+
+```
+
+
+```{r}
+```
+
+
+```{r}
+```
+
